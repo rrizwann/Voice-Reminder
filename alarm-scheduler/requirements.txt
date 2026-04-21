@@ -1,0 +1,4 @@
+azure-functions==1.19.0
+sqlalchemy==2.0.30
+pyodbc==5.1.0
+firebase-admin==6.5.0

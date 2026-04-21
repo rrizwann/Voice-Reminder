@@ -1,0 +1,12 @@
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+sqlalchemy==2.0.30
+pyodbc==5.1.0
+# Use mssql+pyodbc driver for Azure SQL
+# pip install mssql-django is not needed here
+azure-cognitiveservices-speech==1.37.0
+azure-storage-blob==12.19.1
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+pydantic[email]==2.7.1
+python-multipart==0.0.9

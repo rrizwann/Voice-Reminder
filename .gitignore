@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Environment
+.env
+*.env
+local.settings.json
+
+# Node / Expo
+node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+*.log
+
+# Azure Function local storage
+__azurite_db*
+azurite_db*
+
+# Firebase
+google-services.json
+GoogleService-Info.plist
+firebase-credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
