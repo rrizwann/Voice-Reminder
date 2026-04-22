@@ -8,9 +8,7 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
-  Platform,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import { useReminderStore } from '../store/reminderStore';
 import { registerForPushNotifications } from '../services/notifications';
@@ -18,19 +16,39 @@ import type { RepeatType } from '../types';
 
 const REPEAT_OPTIONS: RepeatType[] = ['once', 'daily', 'weekdays', 'weekends'];
 
+function buildAlarmDate(dateStr: string, timeStr: string): Date | null {
+  const dateParts = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeParts = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (!dateParts || !timeParts) return null;
+  const d = new Date(
+    parseInt(dateParts[1]),
+    parseInt(dateParts[2]) - 1,
+    parseInt(dateParts[3]),
+    parseInt(timeParts[1]),
+    parseInt(timeParts[2]),
+    0,
+    0,
+  );
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function nowPlusFiveStr() {
+  const d = new Date(Date.now() + 5 * 60 * 1000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 export default function CreateReminderScreen() {
   const router = useRouter();
   const createReminder = useReminderStore((s) => s.createReminder);
 
   const [messageText, setMessageText] = useState('');
-  const [alarmAt, setAlarmAt] = useState(() => {
-    const d = new Date();
-    d.setSeconds(0, 0);
-    d.setMinutes(d.getMinutes() + 5);
-    return d;
-  });
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [dateStr, setDateStr] = useState(todayStr);
+  const [timeStr, setTimeStr] = useState(nowPlusFiveStr);
   const [repeatType, setRepeatType] = useState<RepeatType>('once');
   const [loading, setLoading] = useState(false);
   const [deviceToken, setDeviceToken] = useState<string | null>(null);
@@ -42,6 +60,11 @@ export default function CreateReminderScreen() {
   const handleCreate = async () => {
     if (!messageText.trim()) {
       Alert.alert('Error', 'Please enter a reminder message.');
+      return;
+    }
+    const alarmAt = buildAlarmDate(dateStr, timeStr);
+    if (!alarmAt) {
+      Alert.alert('Error', 'Invalid date or time. Use YYYY-MM-DD and HH:MM format.');
       return;
     }
     if (alarmAt <= new Date()) {
@@ -74,55 +97,23 @@ export default function CreateReminderScreen() {
         onChangeText={setMessageText}
       />
 
-      <Text style={styles.label}>Date</Text>
-      <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowDatePicker(true)}>
-        <Text style={styles.pickerBtnText}>
-          {alarmAt.toLocaleDateString(undefined, {
-            weekday: 'short',
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-          })}
-        </Text>
-      </TouchableOpacity>
-      {showDatePicker && (
-        <DateTimePicker
-          value={alarmAt}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'inline' : 'default'}
-          minimumDate={new Date()}
-          onChange={(_, date) => {
-            setShowDatePicker(false);
-            if (date) {
-              const next = new Date(alarmAt);
-              next.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
-              setAlarmAt(next);
-            }
-          }}
-        />
-      )}
+      <Text style={styles.label}>Date (YYYY-MM-DD)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="2026-04-23"
+        value={dateStr}
+        onChangeText={setDateStr}
+        keyboardType="numeric"
+      />
 
-      <Text style={styles.label}>Time</Text>
-      <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowTimePicker(true)}>
-        <Text style={styles.pickerBtnText}>
-          {alarmAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </Text>
-      </TouchableOpacity>
-      {showTimePicker && (
-        <DateTimePicker
-          value={alarmAt}
-          mode="time"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={(_, time) => {
-            setShowTimePicker(false);
-            if (time) {
-              const next = new Date(alarmAt);
-              next.setHours(time.getHours(), time.getMinutes(), 0, 0);
-              setAlarmAt(next);
-            }
-          }}
-        />
-      )}
+      <Text style={styles.label}>Time (HH:MM, 24-hour)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="14:30"
+        value={timeStr}
+        onChangeText={setTimeStr}
+        keyboardType="numeric"
+      />
 
       <Text style={styles.label}>Repeat</Text>
       <View style={styles.repeatRow}>
@@ -132,9 +123,7 @@ export default function CreateReminderScreen() {
             style={[styles.repeatBtn, repeatType === opt && styles.repeatBtnActive]}
             onPress={() => setRepeatType(opt)}
           >
-            <Text
-              style={[styles.repeatBtnText, repeatType === opt && styles.repeatBtnTextActive]}
-            >
+            <Text style={[styles.repeatBtnText, repeatType === opt && styles.repeatBtnTextActive]}>
               {opt}
             </Text>
           </TouchableOpacity>
@@ -176,15 +165,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   textArea: { minHeight: 90, textAlignVertical: 'top' },
-  pickerBtn: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 20,
-  },
-  pickerBtnText: { fontSize: 16, color: '#111827' },
   repeatRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
