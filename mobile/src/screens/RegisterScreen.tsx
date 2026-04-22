@@ -35,8 +35,12 @@ export default function RegisterScreen() {
       await register(name.trim(), email.trim(), password, timezone);
       router.replace('/(app)/home');
     } catch (err: any) {
-      const detail = err?.response?.data?.detail ?? 'Registration failed.';
-      Alert.alert('Error', detail);
+      const detail = err?.response?.data?.detail
+        ?? err?.message
+        ?? 'Registration failed.';
+      const url = err?.config?.url ?? '';
+      const baseURL = err?.config?.baseURL ?? '';
+      Alert.alert('Error', `${detail}\n\nURL: ${baseURL}${url}`);
     } finally {
       setLoading(false);
     }
