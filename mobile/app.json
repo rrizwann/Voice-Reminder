@@ -21,6 +21,7 @@
         "POST_NOTIFICATIONS"
       ]
     },
+    "newArchEnabled": false,
     "plugins": [
       "expo-router",
       [
