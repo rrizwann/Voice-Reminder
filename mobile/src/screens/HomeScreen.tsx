@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,9 @@ import {
   RefreshControl,
   SafeAreaView,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { Audio, AVPlaybackStatus } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import { api } from '../services/api';
@@ -19,12 +20,25 @@ import { useReminderStore } from '../store/reminderStore';
 import { useAuthStore } from '../store/authStore';
 import type { Reminder } from '../types';
 
+const SNOOZE_MINUTES = 5;
+
 export default function HomeScreen() {
   const router = useRouter();
-  const { reminders, isLoading, fetchReminders, toggleReminder, deleteReminder } =
+  const { reminders, isLoading, fetchReminders, toggleReminder, deleteReminder, updateReminderDetails } =
     useReminderStore();
   const logout = useAuthStore((s) => s.logout);
+
   const [ringingId, setRingingId] = useState<string | null>(null);
+  const [alarmReminder, setAlarmReminder] = useState<Reminder | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
+
+  const stopSound = useCallback(async () => {
+    if (soundRef.current) {
+      await soundRef.current.stopAsync().catch(() => {});
+      await soundRef.current.unloadAsync().catch(() => {});
+      soundRef.current = null;
+    }
+  }, []);
 
   const handleRing = useCallback(async (item: Reminder) => {
     setRingingId(item.id);
@@ -36,16 +50,46 @@ export default function HomeScreen() {
       });
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
       const { sound } = await Audio.Sound.createAsync({ uri });
+      soundRef.current = sound;
       await sound.playAsync();
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) sound.unloadAsync();
+      setAlarmReminder(item);
+      setRingingId(null);
+      sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
+        if (status.isLoaded && status.didJustFinish) {
+          soundRef.current = null;
+        }
       });
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.detail ?? err?.message ?? 'Could not play alarm.');
-    } finally {
       setRingingId(null);
     }
   }, []);
+
+  const handleSnooze = useCallback(async () => {
+    if (!alarmReminder) return;
+    await stopSound();
+    setAlarmReminder(null);
+    const snoozeTime = new Date(Date.now() + SNOOZE_MINUTES * 60 * 1000);
+    try {
+      await updateReminderDetails(alarmReminder.id, snoozeTime, alarmReminder.repeat_type as any);
+      await fetchReminders();
+      Alert.alert('Snoozed', `Alarm will ring again in ${SNOOZE_MINUTES} minutes.`);
+    } catch (err: any) {
+      Alert.alert('Error', 'Could not snooze.');
+    }
+  }, [alarmReminder, stopSound, updateReminderDetails, fetchReminders]);
+
+  const handleDismiss = useCallback(async () => {
+    if (!alarmReminder) return;
+    await stopSound();
+    setAlarmReminder(null);
+    try {
+      await toggleReminder(alarmReminder.id, false);
+      await fetchReminders();
+    } catch (err: any) {
+      Alert.alert('Error', 'Could not dismiss.');
+    }
+  }, [alarmReminder, stopSound, toggleReminder, fetchReminders]);
 
   useEffect(() => {
     fetchReminders().catch((err) =>
@@ -57,11 +101,7 @@ export default function HomeScreen() {
     (id: string) => {
       Alert.alert('Delete Reminder', 'Are you sure?', [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => deleteReminder(id),
-        },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteReminder(id) },
       ]);
     },
     [deleteReminder],
@@ -77,9 +117,7 @@ export default function HomeScreen() {
     return (
       <TouchableOpacity style={styles.card} onPress={() => router.push(`/(app)/edit?id=${item.id}`)}>
         <View style={styles.cardBody}>
-          <Text style={styles.messageText} numberOfLines={2}>
-            {item.message_text}
-          </Text>
+          <Text style={styles.messageText} numberOfLines={2}>{item.message_text}</Text>
           <Text style={styles.alarmTime}>
             {alarmDate.toLocaleDateString()} {alarmDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
@@ -122,20 +160,37 @@ export default function HomeScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl refreshing={isLoading} onRefresh={fetchReminders} />
-        }
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={fetchReminders} />}
         ListEmptyComponent={
           <Text style={styles.emptyText}>No reminders yet. Tap + to add one.</Text>
         }
       />
 
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => router.push('/(app)/create')}
-      >
+      <TouchableOpacity style={styles.fab} onPress={() => router.push('/(app)/create')}>
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
+
+      {/* Alarm Modal */}
+      <Modal visible={!!alarmReminder} transparent animationType="fade">
+        <View style={styles.alarmOverlay}>
+          <View style={styles.alarmCard}>
+            <Text style={styles.alarmEmoji}>🔔</Text>
+            <Text style={styles.alarmTitle}>Reminder</Text>
+            <Text style={styles.alarmMessage}>{alarmReminder?.message_text}</Text>
+            <Text style={styles.alarmTime2}>
+              {alarmReminder ? new Date(alarmReminder.alarm_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+            </Text>
+
+            <TouchableOpacity style={styles.snoozeBtn} onPress={handleSnooze}>
+              <Text style={styles.snoozeBtnText}>⏰  Snooze {SNOOZE_MINUTES} min</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.dismissBtn} onPress={handleDismiss}>
+              <Text style={styles.dismissBtnText}>✓  Dismiss</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -187,12 +242,7 @@ const styles = StyleSheet.create({
   ringBtnText: { fontSize: 20 },
   deleteBtn: { marginTop: 8 },
   deleteBtnText: { fontSize: 13, color: '#EF4444' },
-  emptyText: {
-    textAlign: 'center',
-    color: '#9CA3AF',
-    fontSize: 16,
-    marginTop: 60,
-  },
+  emptyText: { textAlign: 'center', color: '#9CA3AF', fontSize: 16, marginTop: 60 },
   fab: {
     position: 'absolute',
     bottom: 32,
@@ -210,4 +260,52 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   fabText: { fontSize: 30, color: '#fff', lineHeight: 34 },
+  // Alarm modal
+  alarmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alarmCard: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 32,
+    alignItems: 'center',
+    width: '100%',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  alarmEmoji: { fontSize: 56, marginBottom: 12 },
+  alarmTitle: { fontSize: 22, fontWeight: '700', color: '#111827', marginBottom: 12 },
+  alarmMessage: {
+    fontSize: 17,
+    color: '#374151',
+    textAlign: 'center',
+    marginBottom: 8,
+    lineHeight: 24,
+  },
+  alarmTime2: { fontSize: 14, color: '#9CA3AF', marginBottom: 32 },
+  snoozeBtn: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  snoozeBtnText: { color: '#4F46E5', fontSize: 17, fontWeight: '700' },
+  dismissBtn: {
+    backgroundColor: '#4F46E5',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    width: '100%',
+    alignItems: 'center',
+  },
+  dismissBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
 });
