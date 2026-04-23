@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,12 @@ import {
   Alert,
   RefreshControl,
   SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
+import { api } from '../services/api';
 import { useReminderStore } from '../store/reminderStore';
 import { useAuthStore } from '../store/authStore';
 import type { Reminder } from '../types';
@@ -20,6 +24,28 @@ export default function HomeScreen() {
   const { reminders, isLoading, fetchReminders, toggleReminder, deleteReminder } =
     useReminderStore();
   const logout = useAuthStore((s) => s.logout);
+  const [ringingId, setRingingId] = useState<string | null>(null);
+
+  const handleRing = useCallback(async (item: Reminder) => {
+    setRingingId(item.id);
+    try {
+      const { data } = await api.post(`/api/reminders/${item.id}/ring`);
+      const uri = FileSystem.cacheDirectory + 'alarm.mp3';
+      await FileSystem.writeAsStringAsync(uri, data.audio_base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+      const { sound } = await Audio.Sound.createAsync({ uri });
+      await sound.playAsync();
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) sound.unloadAsync();
+      });
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.detail ?? err?.message ?? 'Could not play alarm.');
+    } finally {
+      setRingingId(null);
+    }
+  }, []);
 
   useEffect(() => {
     fetchReminders().catch((err) =>
@@ -65,6 +91,15 @@ export default function HomeScreen() {
             onValueChange={(val) => toggleReminder(item.id, val)}
             trackColor={{ true: '#4F46E5' }}
           />
+          <TouchableOpacity
+            onPress={() => handleRing(item)}
+            style={styles.ringBtn}
+            disabled={ringingId === item.id}
+          >
+            {ringingId === item.id
+              ? <ActivityIndicator size="small" color="#4F46E5" />
+              : <Text style={styles.ringBtnText}>🔔</Text>}
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
             <Text style={styles.deleteBtnText}>Delete</Text>
           </TouchableOpacity>
@@ -148,6 +183,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   cardActions: { justifyContent: 'space-between', alignItems: 'flex-end' },
+  ringBtn: { marginTop: 4, padding: 4, minWidth: 32, alignItems: 'center' },
+  ringBtnText: { fontSize: 20 },
   deleteBtn: { marginTop: 8 },
   deleteBtnText: { fontSize: 13, color: '#EF4444' },
   emptyText: {

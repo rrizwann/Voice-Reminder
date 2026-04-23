@@ -159,6 +159,23 @@ def _get_owned_reminder(reminder_id: str, user_id: str, db: Session) -> models.R
     return reminder
 
 
+@app.post("/api/reminders/{reminder_id}/ring")
+def ring_reminder(
+    reminder_id: str,
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    reminder = _get_owned_reminder(reminder_id, current_user.id, db)
+    try:
+        mp3_bytes = tts.synthesize_to_mp3(reminder.message_text)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {
+        "audio_base64": base64.b64encode(mp3_bytes).decode(),
+        "message_text": reminder.message_text,
+    }
+
+
 # ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
