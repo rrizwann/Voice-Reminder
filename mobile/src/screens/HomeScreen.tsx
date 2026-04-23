@@ -22,7 +22,9 @@ export default function HomeScreen() {
   const logout = useAuthStore((s) => s.logout);
 
   useEffect(() => {
-    fetchReminders();
+    fetchReminders().catch((err) =>
+      Alert.alert('Could not load reminders', err.message),
+    );
   }, []);
 
   const handleDelete = useCallback(

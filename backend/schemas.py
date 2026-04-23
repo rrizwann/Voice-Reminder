@@ -31,6 +31,10 @@ class UserOut(BaseModel):
         from_attributes = True
 
 
+class TtsPreviewRequest(BaseModel):
+    message_text: str
+
+
 class ReminderCreate(BaseModel):
     message_text: str
     alarm_at: datetime

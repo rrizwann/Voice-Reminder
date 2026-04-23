@@ -1,4 +1,5 @@
 import uuid
+import base64
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -46,6 +47,22 @@ def login(payload: schemas.UserLogin, db: Session = Depends(get_db)):
     if not user or not auth.verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return {"access_token": auth.create_access_token(user.id)}
+
+
+# ── TTS Preview ───────────────────────────────────────────────────────────────
+
+@app.post("/api/tts/preview")
+def preview_tts(
+    payload: schemas.TtsPreviewRequest,
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    if not payload.message_text.strip():
+        raise HTTPException(status_code=400, detail="Message text is required")
+    try:
+        mp3_bytes = tts.synthesize_to_mp3(payload.message_text)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"audio_base64": base64.b64encode(mp3_bytes).decode()}
 
 
 # ── Reminders ─────────────────────────────────────────────────────────────────

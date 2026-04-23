@@ -25,6 +25,9 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
     try {
       const { data } = await api.get<Reminder[]>('/api/reminders');
       set({ reminders: data });
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail ?? err?.message ?? 'Network error';
+      throw new Error(msg);
     } finally {
       set({ isLoading: false });
     }
