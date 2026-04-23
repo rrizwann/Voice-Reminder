@@ -49,7 +49,7 @@ export default function HomeScreen() {
   const renderItem = ({ item }: { item: Reminder }) => {
     const alarmDate = new Date(item.alarm_at);
     return (
-      <View style={styles.card}>
+      <TouchableOpacity style={styles.card} onPress={() => router.push(`/(app)/edit?id=${item.id}`)}>
         <View style={styles.cardBody}>
           <Text style={styles.messageText} numberOfLines={2}>
             {item.message_text}
@@ -69,7 +69,7 @@ export default function HomeScreen() {
             <Text style={styles.deleteBtnText}>Delete</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 

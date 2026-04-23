@@ -12,6 +12,7 @@ interface ReminderState {
     repeatType: RepeatType,
     deviceToken: string | null,
   ) => Promise<void>;
+  updateReminderDetails: (id: string, alarmAt: Date, repeatType: RepeatType) => Promise<void>;
   toggleReminder: (id: string, isActive: boolean) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
 }
@@ -41,6 +42,16 @@ export const useReminderStore = create<ReminderState>((set, get) => ({
       device_token: deviceToken,
     });
     set((state) => ({ reminders: [data, ...state.reminders] }));
+  },
+
+  updateReminderDetails: async (id, alarmAt, repeatType) => {
+    const { data } = await api.patch<Reminder>(`/api/reminders/${id}`, {
+      alarm_at: alarmAt.toISOString(),
+      repeat_type: repeatType,
+    });
+    set((state) => ({
+      reminders: state.reminders.map((r) => (r.id === id ? data : r)),
+    }));
   },
 
   toggleReminder: async (id, isActive) => {
