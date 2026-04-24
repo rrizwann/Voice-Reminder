@@ -21,6 +21,7 @@ import { useAuthStore } from '../store/authStore';
 import type { Reminder } from '../types';
 
 const SNOOZE_MINUTES = 5;
+const REPEAT_INTERVAL_MS = 30_000;
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -31,13 +32,30 @@ export default function HomeScreen() {
   const [ringingId, setRingingId] = useState<string | null>(null);
   const [alarmReminder, setAlarmReminder] = useState<Reminder | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const repeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alarmAudioUri = useRef<string | null>(null);
 
   const stopSound = useCallback(async () => {
+    if (repeatTimerRef.current) {
+      clearInterval(repeatTimerRef.current);
+      repeatTimerRef.current = null;
+    }
     if (soundRef.current) {
       await soundRef.current.stopAsync().catch(() => {});
       await soundRef.current.unloadAsync().catch(() => {});
       soundRef.current = null;
     }
+  }, []);
+
+  const playAlarmAudio = useCallback(async (uri: string) => {
+    if (soundRef.current) {
+      await soundRef.current.stopAsync().catch(() => {});
+      await soundRef.current.unloadAsync().catch(() => {});
+      soundRef.current = null;
+    }
+    const { sound } = await Audio.Sound.createAsync({ uri });
+    soundRef.current = sound;
+    await sound.playAsync();
   }, []);
 
   const handleRing = useCallback(async (item: Reminder) => {
@@ -49,21 +67,22 @@ export default function HomeScreen() {
         encoding: FileSystem.EncodingType.Base64,
       });
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-      const { sound } = await Audio.Sound.createAsync({ uri });
-      soundRef.current = sound;
-      await sound.playAsync();
+      alarmAudioUri.current = uri;
+      await playAlarmAudio(uri);
       setAlarmReminder(item);
       setRingingId(null);
-      sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
-        if (status.isLoaded && status.didJustFinish) {
-          soundRef.current = null;
+
+      // Repeat every 30 seconds until dismissed or snoozed
+      repeatTimerRef.current = setInterval(async () => {
+        if (alarmAudioUri.current) {
+          await playAlarmAudio(alarmAudioUri.current).catch(() => {});
         }
-      });
+      }, REPEAT_INTERVAL_MS);
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.detail ?? err?.message ?? 'Could not play alarm.');
       setRingingId(null);
     }
-  }, []);
+  }, [playAlarmAudio]);
 
   const handleSnooze = useCallback(async () => {
     if (!alarmReminder) return;
