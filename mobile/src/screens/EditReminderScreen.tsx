@@ -14,7 +14,7 @@ import { useReminderStore } from '../store/reminderStore';
 import type { RepeatType } from '../types';
 
 const REPEAT_OPTIONS: RepeatType[] = ['once', 'daily', 'weekdays', 'weekends'];
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function daysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
@@ -28,13 +28,12 @@ function formatDate(d: Date) {
 function formatTime(d: Date) {
   const h = d.getHours();
   const m = String(d.getMinutes()).padStart(2, '0');
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return `${h % 12 || 12}:${m} ${ampm}`;
+  return `${h % 12 || 12}:${m} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
-function Stepper({ label, value, onDecrement, onIncrement }: {
-  label: string; value: string; onDecrement: () => void; onIncrement: () => void;
-}) {
+function Stepper({
+  label, value, onDecrement, onIncrement,
+}: { label: string; value: string; onDecrement: () => void; onIncrement: () => void }) {
   return (
     <View style={s.stepperRow}>
       <Text style={s.stepperLabel}>{label}</Text>
@@ -52,8 +51,7 @@ function Stepper({ label, value, onDecrement, onIncrement }: {
 export default function EditReminderScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { reminders, toggleReminder } = useReminderStore();
-  const updateReminder = useReminderStore((st) => st.toggleReminder);
+  const { reminders, updateReminderDetails } = useReminderStore();
 
   const reminder = reminders.find((r) => r.id === id);
 
@@ -67,8 +65,6 @@ export default function EditReminderScreen() {
   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
   const [draft, setDraft] = useState(new Date());
   const [loading, setLoading] = useState(false);
-
-  const { updateReminderDetails } = useReminderStore();
 
   if (!reminder) {
     return (
@@ -94,10 +90,7 @@ export default function EditReminderScreen() {
       const d = new Date(prev);
       if (field === 'year') d.setFullYear(d.getFullYear() + delta);
       if (field === 'month') d.setMonth(clamp(d.getMonth() + delta, 0, 11));
-      if (field === 'day') {
-        const maxDay = daysInMonth(d.getFullYear(), d.getMonth());
-        d.setDate(clamp(d.getDate() + delta, 1, maxDay));
-      }
+      if (field === 'day') d.setDate(clamp(d.getDate() + delta, 1, daysInMonth(d.getFullYear(), d.getMonth())));
       return d;
     });
   };
@@ -121,7 +114,7 @@ export default function EditReminderScreen() {
       await updateReminderDetails(id, alarmAt, repeatType);
       router.back();
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail ?? err?.message ?? 'Update failed.');
+      Alert.alert('Error', err?.message ?? 'Update failed.');
     } finally {
       setLoading(false);
     }

@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState, useRef } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,112 +9,36 @@ import {
   Alert,
   RefreshControl,
   SafeAreaView,
-  ActivityIndicator,
   Modal,
 } from 'react-native';
-import { Audio, AVPlaybackStatus } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as Speech from 'expo-speech';
 import { useRouter } from 'expo-router';
-import { api } from '../services/api';
 import { useReminderStore } from '../store/reminderStore';
-import { useAuthStore } from '../store/authStore';
 import type { Reminder } from '../types';
 
 const SNOOZE_MINUTES = 5;
-const REPEAT_INTERVAL_MS = 30_000;
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { reminders, isLoading, fetchReminders, toggleReminder, deleteReminder, updateReminderDetails } =
-    useReminderStore();
-  const logout = useAuthStore((s) => s.logout);
-
-  const [ringingId, setRingingId] = useState<string | null>(null);
-  const [alarmReminder, setAlarmReminder] = useState<Reminder | null>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
-  const repeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const alarmAudioUri = useRef<string | null>(null);
-
-  const stopSound = useCallback(async () => {
-    if (repeatTimerRef.current) {
-      clearInterval(repeatTimerRef.current);
-      repeatTimerRef.current = null;
-    }
-    if (soundRef.current) {
-      await soundRef.current.stopAsync().catch(() => {});
-      await soundRef.current.unloadAsync().catch(() => {});
-      soundRef.current = null;
-    }
-  }, []);
-
-  const playAlarmAudio = useCallback(async (uri: string) => {
-    if (soundRef.current) {
-      await soundRef.current.stopAsync().catch(() => {});
-      await soundRef.current.unloadAsync().catch(() => {});
-      soundRef.current = null;
-    }
-    const { sound } = await Audio.Sound.createAsync({ uri });
-    soundRef.current = sound;
-    await sound.playAsync();
-  }, []);
-
-  const handleRing = useCallback(async (item: Reminder) => {
-    setRingingId(item.id);
-    try {
-      const { data } = await api.post(`/api/reminders/${item.id}/ring`);
-      const uri = FileSystem.cacheDirectory + 'alarm.mp3';
-      await FileSystem.writeAsStringAsync(uri, data.audio_base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-      alarmAudioUri.current = uri;
-      await playAlarmAudio(uri);
-      setAlarmReminder(item);
-      setRingingId(null);
-
-      // Repeat every 30 seconds until dismissed or snoozed
-      repeatTimerRef.current = setInterval(async () => {
-        if (alarmAudioUri.current) {
-          await playAlarmAudio(alarmAudioUri.current).catch(() => {});
-        }
-      }, REPEAT_INTERVAL_MS);
-    } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.detail ?? err?.message ?? 'Could not play alarm.');
-      setRingingId(null);
-    }
-  }, [playAlarmAudio]);
-
-  const handleSnooze = useCallback(async () => {
-    if (!alarmReminder) return;
-    await stopSound();
-    setAlarmReminder(null);
-    const snoozeTime = new Date(Date.now() + SNOOZE_MINUTES * 60 * 1000);
-    try {
-      await updateReminderDetails(alarmReminder.id, snoozeTime, alarmReminder.repeat_type as any);
-      await fetchReminders();
-      Alert.alert('Snoozed', `Alarm will ring again in ${SNOOZE_MINUTES} minutes.`);
-    } catch (err: any) {
-      Alert.alert('Error', 'Could not snooze.');
-    }
-  }, [alarmReminder, stopSound, updateReminderDetails, fetchReminders]);
-
-  const handleDismiss = useCallback(async () => {
-    if (!alarmReminder) return;
-    await stopSound();
-    setAlarmReminder(null);
-    try {
-      await toggleReminder(alarmReminder.id, false);
-      await fetchReminders();
-    } catch (err: any) {
-      Alert.alert('Error', 'Could not dismiss.');
-    }
-  }, [alarmReminder, stopSound, toggleReminder, fetchReminders]);
+  const {
+    reminders,
+    isLoading,
+    fetchReminders,
+    toggleReminder,
+    deleteReminder,
+    activeAlarm,
+    setActiveAlarm,
+    snoozeAlarm,
+    dismissAlarm,
+  } = useReminderStore();
 
   useEffect(() => {
-    fetchReminders().catch((err) =>
-      Alert.alert('Could not load reminders', err.message),
-    );
+    fetchReminders().catch(() => {});
   }, []);
+
+  const handleRingNow = useCallback((item: Reminder) => {
+    setActiveAlarm(item);
+  }, [setActiveAlarm]);
 
   const handleDelete = useCallback(
     (id: string) => {
@@ -126,19 +50,18 @@ export default function HomeScreen() {
     [deleteReminder],
   );
 
-  const handleLogout = useCallback(async () => {
-    await logout();
-    router.replace('/(auth)/login');
-  }, [logout, router]);
-
   const renderItem = ({ item }: { item: Reminder }) => {
     const alarmDate = new Date(item.alarm_at);
     return (
-      <TouchableOpacity style={styles.card} onPress={() => router.push(`/(app)/edit?id=${item.id}`)}>
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => router.push(`/(app)/edit?id=${item.id}`)}
+      >
         <View style={styles.cardBody}>
           <Text style={styles.messageText} numberOfLines={2}>{item.message_text}</Text>
           <Text style={styles.alarmTime}>
-            {alarmDate.toLocaleDateString()} {alarmDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {alarmDate.toLocaleDateString()}{' '}
+            {alarmDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
           <Text style={styles.repeatBadge}>{item.repeat_type}</Text>
         </View>
@@ -148,14 +71,8 @@ export default function HomeScreen() {
             onValueChange={(val) => toggleReminder(item.id, val)}
             trackColor={{ true: '#4F46E5' }}
           />
-          <TouchableOpacity
-            onPress={() => handleRing(item)}
-            style={styles.ringBtn}
-            disabled={ringingId === item.id}
-          >
-            {ringingId === item.id
-              ? <ActivityIndicator size="small" color="#4F46E5" />
-              : <Text style={styles.ringBtnText}>🔔</Text>}
+          <TouchableOpacity onPress={() => handleRingNow(item)} style={styles.ringBtn}>
+            <Text style={styles.ringBtnText}>🔔</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
             <Text style={styles.deleteBtnText}>Delete</Text>
@@ -169,9 +86,6 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Reminders</Text>
-        <TouchableOpacity onPress={handleLogout}>
-          <Text style={styles.logoutText}>Sign Out</Text>
-        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -189,22 +103,27 @@ export default function HomeScreen() {
         <Text style={styles.fabText}>+</Text>
       </TouchableOpacity>
 
-      {/* Alarm Modal */}
-      <Modal visible={!!alarmReminder} transparent animationType="fade">
+      {/* Alarm modal — shown when Ring Now is tapped or notification triggers */}
+      <Modal visible={!!activeAlarm} transparent animationType="fade">
         <View style={styles.alarmOverlay}>
           <View style={styles.alarmCard}>
             <Text style={styles.alarmEmoji}>🔔</Text>
             <Text style={styles.alarmTitle}>Reminder</Text>
-            <Text style={styles.alarmMessage}>{alarmReminder?.message_text}</Text>
+            <Text style={styles.alarmMessage}>{activeAlarm?.message_text}</Text>
             <Text style={styles.alarmTime2}>
-              {alarmReminder ? new Date(alarmReminder.alarm_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+              {activeAlarm
+                ? new Date(activeAlarm.alarm_at).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : ''}
             </Text>
 
-            <TouchableOpacity style={styles.snoozeBtn} onPress={handleSnooze}>
+            <TouchableOpacity style={styles.snoozeBtn} onPress={snoozeAlarm}>
               <Text style={styles.snoozeBtnText}>⏰  Snooze {SNOOZE_MINUTES} min</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.dismissBtn} onPress={handleDismiss}>
+            <TouchableOpacity style={styles.dismissBtn} onPress={dismissAlarm}>
               <Text style={styles.dismissBtnText}>✓  Dismiss</Text>
             </TouchableOpacity>
           </View>
@@ -227,7 +146,6 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E5E7EB',
   },
   headerTitle: { fontSize: 22, fontWeight: '700', color: '#111827' },
-  logoutText: { fontSize: 14, color: '#EF4444' },
   list: { padding: 16, paddingBottom: 100 },
   card: {
     backgroundColor: '#fff',
@@ -279,7 +197,6 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   fabText: { fontSize: 30, color: '#fff', lineHeight: 34 },
-  // Alarm modal
   alarmOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',

@@ -10,34 +10,28 @@ import {
   ScrollView,
   Modal,
 } from 'react-native';
-import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as Speech from 'expo-speech';
 import { useRouter } from 'expo-router';
-import { api } from '../services/api';
 import { useReminderStore } from '../store/reminderStore';
-import { registerForPushNotifications } from '../services/notifications';
+import { requestNotificationPermissions } from '../services/scheduler';
 import type { RepeatType } from '../types';
 
 const REPEAT_OPTIONS: RepeatType[] = ['once', 'daily', 'weekdays', 'weekends'];
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function daysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
 }
-
 function clamp(val: number, min: number, max: number) {
   return Math.max(min, Math.min(max, val));
 }
-
 function formatDate(d: Date) {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
-
 function formatTime(d: Date) {
   const h = d.getHours();
   const m = String(d.getMinutes()).padStart(2, '0');
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return `${h % 12 || 12}:${m} ${ampm}`;
+  return `${h % 12 || 12}:${m} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
 function Stepper({
@@ -68,17 +62,14 @@ export default function CreateReminderScreen() {
     d.setMinutes(d.getMinutes() + 5);
     return d;
   });
+  const [repeatType, setRepeatType] = useState<RepeatType>('once');
   const [showPicker, setShowPicker] = useState(false);
   const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
   const [draft, setDraft] = useState(new Date());
-
-  const [repeatType, setRepeatType] = useState<RepeatType>('once');
   const [loading, setLoading] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
-  const [deviceToken, setDeviceToken] = useState<string | null>(null);
 
   useEffect(() => {
-    registerForPushNotifications().then(setDeviceToken);
+    requestNotificationPermissions();
   }, []);
 
   const openPicker = (mode: 'date' | 'time') => {
@@ -92,20 +83,17 @@ export default function CreateReminderScreen() {
     setShowPicker(false);
   };
 
-  const adjustDate = (field: 'year'|'month'|'day', delta: number) => {
+  const adjustDate = (field: 'year' | 'month' | 'day', delta: number) => {
     setDraft((prev) => {
       const d = new Date(prev);
       if (field === 'year') d.setFullYear(d.getFullYear() + delta);
       if (field === 'month') d.setMonth(clamp(d.getMonth() + delta, 0, 11));
-      if (field === 'day') {
-        const maxDay = daysInMonth(d.getFullYear(), d.getMonth());
-        d.setDate(clamp(d.getDate() + delta, 1, maxDay));
-      }
+      if (field === 'day') d.setDate(clamp(d.getDate() + delta, 1, daysInMonth(d.getFullYear(), d.getMonth())));
       return d;
     });
   };
 
-  const adjustTime = (field: 'hour'|'minute', delta: number) => {
+  const adjustTime = (field: 'hour' | 'minute', delta: number) => {
     setDraft((prev) => {
       const d = new Date(prev);
       if (field === 'hour') d.setHours((d.getHours() + delta + 24) % 24);
@@ -114,30 +102,12 @@ export default function CreateReminderScreen() {
     });
   };
 
-  const handlePreview = async () => {
+  const handlePreview = () => {
     if (!messageText.trim()) {
       Alert.alert('Error', 'Enter a message first.');
       return;
     }
-    setPreviewing(true);
-    try {
-      const { data } = await api.post('/api/tts/preview', { message_text: messageText.trim() });
-      const uri = FileSystem.cacheDirectory + 'voice_preview.mp3';
-      await FileSystem.writeAsStringAsync(uri, data.audio_base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-      const { sound } = await Audio.Sound.createAsync({ uri });
-      await sound.playAsync();
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) sound.unloadAsync();
-      });
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail ?? err?.message ?? 'Preview failed.';
-      Alert.alert('Preview Error', msg);
-    } finally {
-      setPreviewing(false);
-    }
+    Speech.speak(messageText.trim(), { language: 'en-US', pitch: 1.0, rate: 0.9 });
   };
 
   const handleCreate = async () => {
@@ -151,12 +121,10 @@ export default function CreateReminderScreen() {
     }
     setLoading(true);
     try {
-      await createReminder(messageText.trim(), alarmAt, repeatType, deviceToken);
+      await createReminder(messageText.trim(), alarmAt, repeatType);
       router.back();
     } catch (err: any) {
-      const detail =
-        err?.response?.data?.detail ?? err?.message ?? 'Failed to create reminder.';
-      Alert.alert('Error', detail);
+      Alert.alert('Error', err?.message ?? 'Failed to create reminder.');
     } finally {
       setLoading(false);
     }
@@ -177,12 +145,8 @@ export default function CreateReminderScreen() {
           onChangeText={setMessageText}
         />
 
-        <TouchableOpacity style={s.previewBtn} onPress={handlePreview} disabled={previewing}>
-          {previewing ? (
-            <ActivityIndicator color="#4F46E5" />
-          ) : (
-            <Text style={s.previewBtnText}>▶  Preview Voice</Text>
-          )}
+        <TouchableOpacity style={s.previewBtn} onPress={handlePreview}>
+          <Text style={s.previewBtnText}>▶  Preview Voice</Text>
         </TouchableOpacity>
 
         <Text style={s.label}>Date</Text>
@@ -213,11 +177,7 @@ export default function CreateReminderScreen() {
         </View>
 
         <TouchableOpacity style={s.createBtn} onPress={handleCreate} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={s.createBtnText}>Save Reminder</Text>
-          )}
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.createBtnText}>Save Reminder</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => router.back()} style={s.cancelBtn}>
@@ -229,45 +189,23 @@ export default function CreateReminderScreen() {
         <View style={s.modalOverlay}>
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>{pickerMode === 'date' ? 'Select Date' : 'Select Time'}</Text>
-
             {pickerMode === 'date' ? (
               <>
-                <Stepper
-                  label="Year"
-                  value={String(draft.getFullYear())}
-                  onDecrement={() => adjustDate('year', -1)}
-                  onIncrement={() => adjustDate('year', 1)}
-                />
-                <Stepper
-                  label="Month"
-                  value={MONTHS[draft.getMonth()]}
-                  onDecrement={() => adjustDate('month', -1)}
-                  onIncrement={() => adjustDate('month', 1)}
-                />
-                <Stepper
-                  label="Day"
-                  value={String(draft.getDate())}
-                  onDecrement={() => adjustDate('day', -1)}
-                  onIncrement={() => adjustDate('day', 1)}
-                />
+                <Stepper label="Year" value={String(draft.getFullYear())}
+                  onDecrement={() => adjustDate('year', -1)} onIncrement={() => adjustDate('year', 1)} />
+                <Stepper label="Month" value={MONTHS[draft.getMonth()]}
+                  onDecrement={() => adjustDate('month', -1)} onIncrement={() => adjustDate('month', 1)} />
+                <Stepper label="Day" value={String(draft.getDate())}
+                  onDecrement={() => adjustDate('day', -1)} onIncrement={() => adjustDate('day', 1)} />
               </>
             ) : (
               <>
-                <Stepper
-                  label="Hour"
-                  value={String(draft.getHours()).padStart(2, '0')}
-                  onDecrement={() => adjustTime('hour', -1)}
-                  onIncrement={() => adjustTime('hour', 1)}
-                />
-                <Stepper
-                  label="Minute"
-                  value={String(draft.getMinutes()).padStart(2, '0')}
-                  onDecrement={() => adjustTime('minute', -5)}
-                  onIncrement={() => adjustTime('minute', 5)}
-                />
+                <Stepper label="Hour" value={String(draft.getHours()).padStart(2, '0')}
+                  onDecrement={() => adjustTime('hour', -1)} onIncrement={() => adjustTime('hour', 1)} />
+                <Stepper label="Minute" value={String(draft.getMinutes()).padStart(2, '0')}
+                  onDecrement={() => adjustTime('minute', -5)} onIncrement={() => adjustTime('minute', 5)} />
               </>
             )}
-
             <TouchableOpacity style={s.modalDoneBtn} onPress={confirmPicker}>
               <Text style={s.modalDoneBtnText}>Done</Text>
             </TouchableOpacity>
@@ -283,98 +221,53 @@ const s = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '700', color: '#111827', marginBottom: 24, marginTop: 8 },
   label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
   input: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    marginBottom: 12,
+    backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB',
+    borderRadius: 12, padding: 14, fontSize: 16, marginBottom: 12,
   },
   textArea: { minHeight: 90, textAlignVertical: 'top' },
   previewBtn: {
-    borderWidth: 1.5,
-    borderColor: '#4F46E5',
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-    marginBottom: 20,
-    minHeight: 44,
-    justifyContent: 'center',
+    borderWidth: 1.5, borderColor: '#4F46E5', borderRadius: 12,
+    padding: 12, alignItems: 'center', marginBottom: 20, minHeight: 44, justifyContent: 'center',
   },
   previewBtnText: { color: '#4F46E5', fontSize: 15, fontWeight: '600' },
   pickerBtn: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB',
+    borderRadius: 12, padding: 14, marginBottom: 20,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
   },
   pickerBtnText: { fontSize: 16, color: '#111827' },
   pickerIcon: { fontSize: 18 },
   repeatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
   repeatBtn: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
+    borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#fff',
   },
   repeatBtnActive: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
   repeatBtnText: { fontSize: 14, color: '#374151' },
   repeatBtnTextActive: { color: '#fff', fontWeight: '600' },
   createBtn: {
-    backgroundColor: '#4F46E5',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 12,
+    backgroundColor: '#4F46E5', borderRadius: 12, padding: 16,
+    alignItems: 'center', marginBottom: 12,
   },
   createBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   cancelBtn: { alignItems: 'center', padding: 12 },
   cancelBtnText: { color: '#6B7280', fontSize: 15 },
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalCard: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: 40,
+    backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: 40,
   },
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 20, textAlign: 'center' },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
+  stepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   stepperLabel: { fontSize: 15, color: '#374151', fontWeight: '600', width: 60 },
   stepBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#EEF2FF',
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: 44, height: 44, borderRadius: 22, backgroundColor: '#EEF2FF',
+    justifyContent: 'center', alignItems: 'center',
   },
   stepBtnText: { fontSize: 22, color: '#4F46E5', fontWeight: '700' },
   stepValue: { fontSize: 20, fontWeight: '700', color: '#111827', minWidth: 80, textAlign: 'center' },
   modalDoneBtn: {
-    backgroundColor: '#4F46E5',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
+    backgroundColor: '#4F46E5', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8,
   },
   modalDoneBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

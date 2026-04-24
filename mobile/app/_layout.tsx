@@ -1,46 +1,62 @@
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
-import { useAuthStore } from '../src/store/authStore';
-import { useRouter, useSegments } from 'expo-router';
-import {
-  addNotificationReceivedListener,
-  handleAlarmPayload,
-} from '../src/services/notifications';
+import { useRouter } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { ensureAlarmChannel, requestNotificationPermissions } from '../src/services/scheduler';
+import { useReminderStore } from '../src/store/reminderStore';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export default function RootLayout() {
-  const { isAuthenticated, isLoading, initialize } = useAuthStore();
   const router = useRouter();
-  const segments = useSegments();
+  const { fetchReminders, setActiveAlarm, reminders } = useReminderStore();
 
   useEffect(() => {
-    initialize();
+    requestNotificationPermissions();
+    ensureAlarmChannel();
+    fetchReminders().catch(() => {});
   }, []);
 
-  // Handle incoming FCM alarm notifications while app is in foreground
+  // Foreground: notification arrives while app is open → trigger alarm modal
   useEffect(() => {
-    const sub = addNotificationReceivedListener((notification) => {
-      const data = notification.request.content.data as Record<string, string>;
-      if (data?.type === 'alarm' && data?.audio_url) {
-        handleAlarmPayload(data.audio_url);
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data as { reminderId?: string; message?: string };
+      if (!data?.reminderId) return;
+      const reminder = useReminderStore.getState().reminders.find((r) => r.id === data.reminderId);
+      if (reminder) {
+        setActiveAlarm(reminder);
       }
     });
     return () => sub.remove();
   }, []);
 
-  // Auth gate: redirect to correct stack based on auth state
+  // Background/killed: user taps notification → open app + trigger alarm modal
   useEffect(() => {
-    if (isLoading) return;
-    const inAuthGroup = segments[0] === '(auth)';
-    if (!isAuthenticated && !inAuthGroup) {
-      router.replace('/(auth)/login');
-    } else if (isAuthenticated && inAuthGroup) {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as { reminderId?: string };
+      if (!data?.reminderId) return;
       router.replace('/(app)/home');
-    }
-  }, [isAuthenticated, isLoading, segments]);
+      // Slight delay to let the screen mount before showing modal
+      setTimeout(() => {
+        const reminder = useReminderStore.getState().reminders.find(
+          (r) => r.id === data.reminderId,
+        );
+        if (reminder) {
+          useReminderStore.getState().setActiveAlarm(reminder);
+        }
+      }, 500);
+    });
+    return () => sub.remove();
+  }, []);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)" />
       <Stack.Screen name="(app)" />
     </Stack>
   );
