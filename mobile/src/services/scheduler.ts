@@ -20,7 +20,6 @@ export async function ensureAlarmChannel(): Promise<void> {
   }
 }
 
-// Returns notification identifiers created (1 for once/daily, up to 5 for weekdays, 2 for weekends)
 export async function scheduleAlarm(
   reminderId: string,
   message: string,
@@ -42,7 +41,11 @@ export async function scheduleAlarm(
     const id = await Notifications.scheduleNotificationAsync({
       identifier: `${reminderId}_0`,
       content,
-      trigger: { date: alarmAt, channelId: 'alarms' } as any,
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: alarmAt,
+        channelId: 'alarms',
+      },
     });
     ids.push(id);
   } else if (repeatType === 'daily') {
@@ -50,42 +53,40 @@ export async function scheduleAlarm(
       identifier: `${reminderId}_0`,
       content,
       trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
         hour: alarmAt.getHours(),
         minute: alarmAt.getMinutes(),
-        repeats: true,
         channelId: 'alarms',
-      } as any,
+      },
     });
     ids.push(id);
   } else if (repeatType === 'weekdays') {
-    // Mon(2) Tue(3) Wed(4) Thu(5) Fri(6) — expo weekday: 1=Sun
-    for (const weekday of [2, 3, 4, 5, 6]) {
+    for (const weekday of [2, 3, 4, 5, 6] as const) {
       const id = await Notifications.scheduleNotificationAsync({
         identifier: `${reminderId}_${weekday}`,
         content,
         trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
           weekday,
           hour: alarmAt.getHours(),
           minute: alarmAt.getMinutes(),
-          repeats: true,
           channelId: 'alarms',
-        } as any,
+        },
       });
       ids.push(id);
     }
   } else {
-    // weekends: Sat(7), Sun(1)
-    for (const weekday of [7, 1]) {
+    for (const weekday of [7, 1] as const) {
       const id = await Notifications.scheduleNotificationAsync({
         identifier: `${reminderId}_${weekday}`,
         content,
         trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
           weekday,
           hour: alarmAt.getHours(),
           minute: alarmAt.getMinutes(),
-          repeats: true,
           channelId: 'alarms',
-        } as any,
+        },
       });
       ids.push(id);
     }
