@@ -33,6 +33,7 @@ export async function scheduleAlarm(
     body: message,
     data: { reminderId, message },
     sound: 'default',
+    ...(Platform.OS === 'android' && { android: { channelId: 'alarms' } } as any),
   };
 
   const ids: string[] = [];
@@ -42,12 +43,7 @@ export async function scheduleAlarm(
     const id = await Notifications.scheduleNotificationAsync({
       identifier: `${reminderId}_0`,
       content,
-      trigger: {
-        type: 'timeInterval',
-        seconds: secondsUntilAlarm,
-        repeats: false,
-        channelId: 'alarms',
-      } as any,
+      trigger: { seconds: secondsUntilAlarm, repeats: false } as any,
     });
     ids.push(id);
   } else if (repeatType === 'daily') {
@@ -55,10 +51,9 @@ export async function scheduleAlarm(
       identifier: `${reminderId}_0`,
       content,
       trigger: {
-        type: 'daily',
         hour: alarmAt.getHours(),
         minute: alarmAt.getMinutes(),
-        channelId: 'alarms',
+        repeats: true,
       } as any,
     });
     ids.push(id);
@@ -68,11 +63,10 @@ export async function scheduleAlarm(
         identifier: `${reminderId}_${weekday}`,
         content,
         trigger: {
-          type: 'weekly',
           weekday,
           hour: alarmAt.getHours(),
           minute: alarmAt.getMinutes(),
-          channelId: 'alarms',
+          repeats: true,
         } as any,
       });
       ids.push(id);
@@ -83,11 +77,10 @@ export async function scheduleAlarm(
         identifier: `${reminderId}_${weekday}`,
         content,
         trigger: {
-          type: 'weekly',
           weekday,
           hour: alarmAt.getHours(),
           minute: alarmAt.getMinutes(),
-          channelId: 'alarms',
+          repeats: true,
         } as any,
       });
       ids.push(id);
