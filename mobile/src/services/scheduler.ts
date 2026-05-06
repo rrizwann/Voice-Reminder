@@ -38,12 +38,14 @@ export async function scheduleAlarm(
   const ids: string[] = [];
 
   if (repeatType === 'once') {
+    const secondsUntilAlarm = Math.max(5, Math.floor((alarmAt.getTime() - Date.now()) / 1000));
     const id = await Notifications.scheduleNotificationAsync({
       identifier: `${reminderId}_0`,
       content,
       trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: alarmAt,
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: secondsUntilAlarm,
+        repeats: false,
         channelId: 'alarms',
       },
     });
